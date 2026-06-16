@@ -146,7 +146,7 @@
             justify-content: space-between;
             align-items: center;
             padding: 5px;
-            border-bottom: 1px calc(#4a4a4a) solid;
+            border-bottom: 1px solid #4a4a4a;
             font-size: 0.9rem;
         }
 
@@ -163,7 +163,7 @@
             justify-content: space-between;
         }
 
-        danger-zone {
+        .danger-zone {
             margin-top: 40px;
             text-align: center;
         }
@@ -552,6 +552,7 @@
             });
 
             myChart = new Chart(ctx, {
+                type: 'bar',
                 data: {
                     labels: months.map(m => m.replace('-','年') + '月'),
                     datasets: datasets
