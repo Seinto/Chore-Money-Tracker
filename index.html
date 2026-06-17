@@ -121,7 +121,13 @@
             width: 100%;
         }
 
-        button:active {
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        button:active:not(:disabled) {
             transform: translate(2px, 2px);
             box-shadow: 0px 0px 0px var(--text);
         }
@@ -179,7 +185,6 @@
             gap: 10px;
         }
 
-        /* バグ修正：ドットを追加してクラスセレクタに修正 */
         .danger-zone {
             margin-top: 40px;
             text-align: center;
@@ -191,7 +196,7 @@
             display: inline-block;
         }
 
-        /* タブ切り替え（グラフ用） */
+        /* タブ切り替え */
         .tab-container {
             display: flex;
             margin-bottom: 10px;
@@ -210,9 +215,20 @@
             background: var(--card-bg);
             border-bottom: none;
         }
+
+        /* ローディング表示用 */
+        #loading-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.7);
+            display: flex; justify-content: center; align-items: center;
+            font-weight: bold; font-size: 1.2rem; z-index: 9999;
+        }
     </style>
 </head>
 <body>
+
+    <div id="loading-overlay">データをよみこみ中...</div>
 
     <header>
         <h1>ジブンでおこづかい帳</h1>
@@ -258,7 +274,7 @@
                 </div>
             </div>
 
-            <button type="submit" class="btn-primary" style="margin-top: 10px;">きろくする！</button>
+            <button type="submit" id="btn-submit" class="btn-primary" style="margin-top: 10px;">きろくする！</button>
         </form>
     </div>
 
@@ -294,7 +310,9 @@
     </div>
 
     <script>
-        // --- 初期データ定義 ---
+        // ⚠️【重要】ここにステップ3で取得したウェブアプリのURLを貼り付けてください！
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbxaMfqUcdJF1GYTKOjw7LHwThuQWbrYoeslRbeyof3Ntj7PmLuA5-tzDV7cqkXSgbNTPA/exec";
+
         let state = {
             children: ["子ども1", "子ども2", "子ども3"],
             jobs: [
@@ -302,24 +320,27 @@
                 { name: "お皿洗い", price: 30 },
                 { name: "ゴミ出し", price: 20 }
             ],
-            logs: [] // { id, childIdx, date, type: 'earn'|'spend', label, amount }
+            logs: []
         };
 
         let currentMode = 'earn'; 
         let myChart = null;
 
-        // --- 画面初期化 ---
-        window.addEventListener('load', () => {
-            const saved = localStorage.getItem('kids_money_pwa_state');
+        window.addEventListener('load', async () => {
+            // 設定（名前、お手伝い項目）は引き続き端末ごとにローカル保存、または初期値を使用
+            const saved = localStorage.getItem('kids_money_pwa_state_settings');
             if (saved) {
-                state = JSON.parse(saved);
+                const parsed = JSON.parse(saved);
+                state.children = parsed.children || state.children;
+                state.jobs = parsed.jobs || state.jobs;
             }
             
             document.getElementById('input-date').value = new Date().toISOString().substring(0, 10);
             
-            // 動的に名前入力フォームを生成
             initNameInputsUI();
-            initUI();
+            
+            // クラウド（スプレッドシート）からログ履歴を取得
+            await fetchLogsFromCloud();
             
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.register('./sw.js')
@@ -328,7 +349,42 @@
             }
         });
 
-        // 名前の入力欄を人数に合わせて動的生成
+        // スプレッドシートからデータを取ってくる関数
+        async function fetchLogsFromCloud() {
+            showLoading(true);
+            try {
+                if(GAS_URL.includes("ここにステップ3")) {
+                    showLoading(false);
+                    return;
+                }
+                const response = await fetch(GAS_URL);
+                const cloudLogs = await response.json();
+                
+                // クラウドから取得したデータを日付・ID順にソートしてstateに格納
+                state.logs = cloudLogs;
+                sortLogs();
+                initUI();
+            } catch (error) {
+                console.error("データ取得エラー:", error);
+                alert("インターネットからデータをよみこめませんでした。");
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function sortLogs() {
+            state.logs.sort((a, b) => {
+                if (b.date !== a.date) {
+                    return new Date(b.date) - new Date(a.date);
+                }
+                return b.id - a.id; 
+            });
+        }
+
+        function showLoading(bool) {
+            document.getElementById('loading-overlay').style.display = bool ? 'flex' : 'none';
+        }
+
         function initNameInputsUI() {
             const container = document.getElementById('name-inputs-container');
             container.innerHTML = '';
@@ -344,7 +400,6 @@
         }
 
         function initUI() {
-            // セレクトボックス更新
             const selectChild = document.getElementById('select-child');
             selectChild.innerHTML = '';
             state.children.forEach((name, idx) => {
@@ -363,7 +418,6 @@
                 selectJob.appendChild(opt);
             });
 
-            // お手伝い設定一覧の更新
             const jobList = document.getElementById('job-settings-list');
             jobList.innerHTML = '';
             state.jobs.forEach((job, idx) => {
@@ -374,23 +428,17 @@
                 jobList.appendChild(div);
             });
 
-            // 残高計算＆残高表示更新
             updateBalances();
-            // 履歴更新
             updateHistoryUI();
-            // 自動でグラフを更新
             renderChart();
         }
 
-        // --- 残高計算 ---
         function updateBalances() {
-            // 人数に合わせて配列の長さを動的に初期化
             const balances = Array(state.children.length).fill(0);
             
             state.logs.forEach(log => {
                 const idx = parseInt(log.childIdx);
                 const amt = parseInt(log.amount);
-                // 削除された子供のインデックスのログを考慮
                 if (idx < balances.length) {
                     if(log.type === 'earn') {
                         balances[idx] += amt;
@@ -413,7 +461,6 @@
             });
         }
 
-        // --- タブ切り替え ---
         function switchMode(mode) {
             currentMode = mode;
             document.getElementById('tab-earn').classList.toggle('active', mode === 'earn');
@@ -422,12 +469,15 @@
             document.getElementById('wrapper-spend').style.display = mode === 'spend' ? 'block' : 'none';
         }
 
-        // --- 設定の保存 ---
         function saveSettings() {
             state.children.forEach((_, i) => {
                 state.children[i] = document.getElementById(`name-child${i}`).value.trim() || `子ども${i+1}`;
             });
-            saveToStorage();
+            // 名前・お手伝い一覧の設定だけ端末ローカルに保存
+            localStorage.setItem('kids_money_pwa_state_settings', JSON.stringify({
+                children: state.children,
+                jobs: state.jobs
+            }));
             initUI();
         }
 
@@ -447,8 +497,8 @@
             saveSettings();
         }
 
-        // --- ログ登録 ---
-        function saveLog(e) {
+        // ログをクラウド（スプレッドシート）に保存する
+        async function saveLog(e) {
             e.preventDefault();
             const childIdx = document.getElementById('select-child').value;
             const date = document.getElementById('input-date').value;
@@ -467,43 +517,58 @@
                 label = document.getElementById('input-spend-title').value.trim() || "お買い物";
                 amount = parseInt(document.getElementById('input-spend-amount').value);
                 if(isNaN(amount) || amount < 0) return alert('正しい金額をいれてね');
-                
-                // 改善：フォームリセット処理を確実に実行
-                document.getElementById('input-spend-title').value = '';
-                document.getElementById('input-spend-amount').value = '';
             }
 
-            state.logs.push({
+            const newLog = {
                 id: Date.now(),
                 childIdx,
                 date,
                 type: currentMode,
                 label,
                 amount
-            });
+            };
 
-            // 改善：同じ日の場合でも登録順が崩れない二段階ソート
-            state.logs.sort((a, b) => {
-                if (b.date !== a.date) {
-                    return new Date(b.date) - new Date(a.date);
+            showLoading(true);
+            try {
+                // スプレッドシートへ送信
+                await fetch(GAS_URL, {
+                    method: "POST",
+                    body: JSON.stringify({ action: "save", log: newLog })
+                });
+
+                // フォームリセット
+                if(currentMode === 'spend') {
+                    document.getElementById('input-spend-title').value = '';
+                    document.getElementById('input-spend-amount').value = '';
                 }
-                return b.id - a.id; 
-            });
 
-            saveToStorage();
-            initUI();
-        }
-
-        // 改善：履歴から1件削除する関数を追加
-        function deleteLog(id) {
-            if(confirm('このきろくを消してもいい？')) {
-                state.logs = state.logs.filter(log => log.id !== id);
-                saveToStorage();
-                initUI();
+                // クラウドから最新状態を再取得
+                await fetchLogsFromCloud();
+            } catch (error) {
+                console.error("保存エラー:", error);
+                alert("送信に失敗しました。電波が良いところでやりなおしてね。");
+                showLoading(false);
             }
         }
 
-        // 履歴UI更新
+        // ログをクラウドから1件消去する
+        async function deleteLog(id) {
+            if(confirm('このきろくを消してもいい？')) {
+                showLoading(true);
+                try {
+                    await fetch(GAS_URL, {
+                        method: "POST",
+                        body: JSON.stringify({ action: "delete", id: id })
+                    });
+                    await fetchLogsFromCloud();
+                } catch (error) {
+                    console.error("削除エラー:", error);
+                    alert("削除に失敗しました。");
+                    showLoading(false);
+                }
+            }
+        }
+
         function updateHistoryUI() {
             const container = document.getElementById('history-container');
             container.innerHTML = '';
@@ -522,7 +587,6 @@
                 const mark = isEarn ? '＋' : 'ー';
                 const color = isEarn ? 'green' : 'red';
                 
-                // 改善：「消す」ボタンをレイアウトに追加
                 div.innerHTML = `
                     <div class="history-left">
                         <div><strong>${log.date.substring(5)}</strong> [${childName}] ${log.label}</div>
@@ -536,7 +600,6 @@
             });
         }
 
-        // --- グラフ集計と描画 ---
         function renderChart() {
             const months = [];
             for (let i = 5; i >= 0; i--) {
@@ -546,7 +609,6 @@
                 months.push(mStr);
             }
 
-            // 動的な人数に応じた収入データ配列の作成
             const earnData = Array.from({length: state.children.length}, () => Array(6).fill(0));
             const spendData = [0,0,0,0,0,0];
 
@@ -554,7 +616,6 @@
                 const mIdx = months.indexOf(log.date.substring(0, 7));
                 if(mIdx !== -1) {
                     const cIdx = parseInt(log.childIdx);
-                    // 削除された子供のインデックス範囲外対策
                     if (cIdx < state.children.length) {
                         if(log.type === 'earn') {
                             earnData[cIdx][mIdx] += log.amount;
@@ -566,16 +627,11 @@
             });
 
             const ctx = document.getElementById('moneyChart').getContext('2d');
-            
-            if (myChart) {
-                myChart.destroy();
-            }
+            if (myChart) { myChart.destroy(); }
 
-            // 子供の人数が増えても対応できるように基本パレットを用意
             const baseColors = ['#ffa07c', '#4ecdc4', '#ffda79', '#95a5a6', '#a55eea'];
             const datasets = [];
             
-            // 子どもの収入グラフ
             state.children.forEach((name, i) => {
                 datasets.push({
                     label: `${name} (おてつだい)`,
@@ -588,7 +644,6 @@
                 });
             });
 
-            // 支出グラフ
             datasets.push({
                 label: 'みんなのつかった分',
                 data: spendData,
@@ -617,27 +672,26 @@
             });
         }
 
-        // --- 共通処理 ---
-        function saveToStorage() {
-            localStorage.setItem('kids_money_pwa_state', JSON.stringify(state));
-        }
-
-        function clearAllData() {
-            if(confirm('本当におこづかいのデータをぜんぶ消してもいい？')) {
-                localStorage.removeItem('kids_money_pwa_state');
-                state = {
-                    children: ["子ども1", "子ども2", "子ども3"],
-                    jobs: [
-                        { name: "お部屋のそうじ", price: 50 },
-                        { name: "お皿洗い", price: 30 },
-                        { name: "ゴミ出し", price: 20 }
-                    ],
-                    logs: []
-                };
-                initNameInputsUI();
-                initUI();
-                if(myChart) myChart.destroy();
-                alert('リセットしました！');
+        // クラウドのデータを全件リセットする
+        async function clearAllData() {
+            if(confirm('本当におこづかいのデータをクラウドも含めてぜんぶ消してもいい？')) {
+                showLoading(true);
+                try {
+                    await fetch(GAS_URL, {
+                        method: "POST",
+                        body: JSON.stringify({ action: "clear" })
+                    });
+                    localStorage.removeItem('kids_money_pwa_state_settings');
+                    state.logs = [];
+                    initUI();
+                    if(myChart) myChart.destroy();
+                    alert('すべてリセットしました！');
+                } catch (error) {
+                    console.error("リセットエラー:", error);
+                    alert("リセットに失敗しました。");
+                } finally {
+                    showLoading(false);
+                }
             }
         }
     </script>
