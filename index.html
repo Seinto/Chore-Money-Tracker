@@ -60,6 +60,11 @@
             padding-bottom: 5px;
         }
 
+        h3 {
+            font-size: 1rem;
+            margin-bottom: 8px;
+        }
+
         .card {
             background: var(--card-bg);
             border: 3px solid var(--text);
@@ -95,9 +100,9 @@
             border-color: var(--primary);
         }
 
-        .grid-3 {
+        .grid-dynamic {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
             gap: 8px;
         }
 
@@ -146,23 +151,35 @@
             justify-content: space-between;
             align-items: center;
             padding: 5px;
-            border-bottom: 1px solid #4a4a4a;
+            border-bottom: 1px #4a4a4a solid;
             font-size: 0.9rem;
         }
 
         /* 履歴テーブル */
         .history-list {
-            max-height: 200px;
+            max-height: 250px;
             overflow-y: auto;
             font-size: 0.85rem;
         }
         .history-item {
-            padding: 6px;
+            padding: 8px 6px;
             border-bottom: 1px solid #eee;
             display: flex;
             justify-content: space-between;
+            align-items: center;
+        }
+        .history-left {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .history-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
+        /* バグ修正：ドットを追加してクラスセレクタに修正 */
         .danger-zone {
             margin-top: 40px;
             text-align: center;
@@ -204,8 +221,7 @@
 
     <div class="card">
         <h2>みんなのちょきんばこ</h2>
-        <div class="grid-3" id="kids-status-container">
-            </div>
+        <div class="grid-dynamic" id="kids-status-container"></div>
     </div>
 
     <div class="card">
@@ -248,8 +264,7 @@
 
     <div class="card">
         <h2>グラフであしあとを見る</h2>
-        <button type="button" onclick="renderChart()" class="btn-primary" style="margin-bottom: 15px;">データをあつめてグラフにする</button>
-        <div style="position: relative; width: 100%; height: 250px;">
+        <div style="position: relative; width: 100%; height: 250px; margin-top: 10px;">
             <canvas id="moneyChart"></canvas>
         </div>
     </div>
@@ -258,11 +273,7 @@
         <h2>せってい（名前・おてつだい）</h2>
         
         <h3>1. 子どものなまえ変更</h3>
-        <div class="grid-3" style="margin-bottom: 15px;">
-            <input type="text" id="name-child0" onchange="saveSettings()" placeholder="子1のなまえ">
-            <input type="text" id="name-child1" onchange="saveSettings()" placeholder="子2のなまえ">
-            <input type="text" id="name-child2" onchange="saveSettings()" placeholder="子3のなまえ">
-        </div>
+        <div class="grid-dynamic" id="name-inputs-container" style="margin-bottom: 15px;"></div>
 
         <h3>2. お手伝いメニューの追加</h3>
         <div style="display: flex; gap: 5px; margin-bottom: 10px;">
@@ -270,14 +281,12 @@
             <input type="number" id="new-job-price" placeholder="円" style="width: 80px;">
             <button type="button" onclick="addJobSetting()" style="width: auto;">追加</button>
         </div>
-        <div class="settings-list" id="job-settings-list">
-            </div>
+        <div class="settings-list" id="job-settings-list"></div>
     </div>
 
     <div class="card">
         <h2>さいきんのきろく</h2>
-        <div class="history-list" id="history-container">
-            </div>
+        <div class="history-list" id="history-container"></div>
     </div>
 
     <div class="danger-zone">
@@ -296,37 +305,45 @@
             logs: [] // { id, childIdx, date, type: 'earn'|'spend', label, amount }
         };
 
-        let currentMode = 'earn'; // 'earn' または 'spend'
+        let currentMode = 'earn'; 
         let myChart = null;
 
         // --- 画面初期化 ---
         window.addEventListener('load', () => {
-            // ローカルストレージから復元
             const saved = localStorage.getItem('kids_money_pwa_state');
             if (saved) {
                 state = JSON.parse(saved);
             }
             
-            // 日付の初期値を今日にする
             document.getElementById('input-date').value = new Date().toISOString().substring(0, 10);
             
+            // 動的に名前入力フォームを生成
+            initNameInputsUI();
             initUI();
             
-            // Service Worker の登録 (PWA用)
             if ('serviceWorker' in navigator) {
-    // GitHub Pagesのサブディレクトリ対策として、相対パスで指定
-    navigator.serviceWorker.register('./sw.js')
-    .then(reg => console.log("SW registered!", reg.scope))
-    .catch(err => console.log("SW registration failed", err));
-}
+                navigator.serviceWorker.register('./sw.js')
+                .then(reg => console.log("SW registered!", reg.scope))
+                .catch(err => console.log("SW registration failed", err));
+            }
         });
 
-        function initUI() {
-            // 設定反映
-            for(let i=0; i<3; i++) {
-                document.getElementById(`name-child${i}`).value = state.children[i] || `子ども${i+1}`;
-            }
+        // 名前の入力欄を人数に合わせて動的生成
+        function initNameInputsUI() {
+            const container = document.getElementById('name-inputs-container');
+            container.innerHTML = '';
+            state.children.forEach((name, i) => {
+                let input = document.createElement('input');
+                input.type = 'text';
+                input.id = `name-child${i}`;
+                input.value = name || `子ども${i+1}`;
+                input.placeholder = `子${i+1}のなまえ`;
+                input.addEventListener('change', saveSettings);
+                container.appendChild(input);
+            });
+        }
 
+        function initUI() {
             // セレクトボックス更新
             const selectChild = document.getElementById('select-child');
             selectChild.innerHTML = '';
@@ -357,29 +374,35 @@
                 jobList.appendChild(div);
             });
 
-            // 集計計算＆残高表示更新
+            // 残高計算＆残高表示更新
             updateBalances();
             // 履歴更新
             updateHistoryUI();
+            // 自動でグラフを更新
+            renderChart();
         }
 
         // --- 残高計算 ---
         function updateBalances() {
-            const balances = [0, 0, 0];
+            // 人数に合わせて配列の長さを動的に初期化
+            const balances = Array(state.children.length).fill(0);
+            
             state.logs.forEach(log => {
                 const idx = parseInt(log.childIdx);
                 const amt = parseInt(log.amount);
-                if(log.type === 'earn') {
-                    balances[idx] += amt;
-                } else {
-                    balances[idx] -= amt;
+                // 削除された子供のインデックスのログを考慮
+                if (idx < balances.length) {
+                    if(log.type === 'earn') {
+                        balances[idx] += amt;
+                    } else {
+                        balances[idx] -= amt;
+                    }
                 }
             });
 
             const container = document.getElementById('kids-status-container');
             container.innerHTML = '';
-            for(let i=0; i<3; i++) {
-                let name = state.children[i] || `子ども${i+1}`;
+            state.children.forEach((name, i) => {
                 let div = document.createElement('div');
                 div.className = 'child-status';
                 div.innerHTML = `
@@ -387,7 +410,7 @@
                     <div class="child-money">${balances[i]} 円</div>
                 `;
                 container.appendChild(div);
-            }
+            });
         }
 
         // --- タブ切り替え ---
@@ -401,9 +424,9 @@
 
         // --- 設定の保存 ---
         function saveSettings() {
-            for(let i=0; i<3; i++) {
+            state.children.forEach((_, i) => {
                 state.children[i] = document.getElementById(`name-child${i}`).value.trim() || `子ども${i+1}`;
-            }
+            });
             saveToStorage();
             initUI();
         }
@@ -445,7 +468,7 @@
                 amount = parseInt(document.getElementById('input-spend-amount').value);
                 if(isNaN(amount) || amount < 0) return alert('正しい金額をいれてね');
                 
-                // フォームリセット用
+                // 改善：フォームリセット処理を確実に実行
                 document.getElementById('input-spend-title').value = '';
                 document.getElementById('input-spend-amount').value = '';
             }
@@ -459,11 +482,25 @@
                 amount
             });
 
-            // 日付順にソート
-            state.logs.sort((a,b) => new Date(b.date) - new Date(a.date));
+            // 改善：同じ日の場合でも登録順が崩れない二段階ソート
+            state.logs.sort((a, b) => {
+                if (b.date !== a.date) {
+                    return new Date(b.date) - new Date(a.date);
+                }
+                return b.id - a.id; 
+            });
 
             saveToStorage();
             initUI();
+        }
+
+        // 改善：履歴から1件削除する関数を追加
+        function deleteLog(id) {
+            if(confirm('このきろくを消してもいい？')) {
+                state.logs = state.logs.filter(log => log.id !== id);
+                saveToStorage();
+                initUI();
+            }
         }
 
         // 履歴UI更新
@@ -485,9 +522,15 @@
                 const mark = isEarn ? '＋' : 'ー';
                 const color = isEarn ? 'green' : 'red';
                 
+                // 改善：「消す」ボタンをレイアウトに追加
                 div.innerHTML = `
-                    <div><strong>${log.date.substring(5)}</strong> [${childName}] ${log.label}</div>
-                    <div style="color:${color}; font-weight:bold;">${mark}${log.amount}円</div>
+                    <div class="history-left">
+                        <div><strong>${log.date.substring(5)}</strong> [${childName}] ${log.label}</div>
+                    </div>
+                    <div class="history-right">
+                        <div style="color:${color}; font-weight:bold;">${mark}${log.amount}円</div>
+                        <button type="button" class="btn-accent" style="width:auto; padding:2px 8px; font-size:0.75rem;" onclick="deleteLog(${log.id})">消す</button>
+                    </div>
                 `;
                 container.appendChild(div);
             });
@@ -495,27 +538,29 @@
 
         // --- グラフ集計と描画 ---
         function renderChart() {
-            // 月ごとの集計ロジック（直近6ヶ月を抽出）
             const months = [];
             for (let i = 5; i >= 0; i--) {
                 let d = new Date();
                 d.setMonth(d.getMonth() - i);
-                let mStr = d.toISOString().substring(0, 7); // "YYYY-MM"
+                let mStr = d.toISOString().substring(0, 7); 
                 months.push(mStr);
             }
 
-            // 各子どもの月別お手伝い（収入）と全体支出データを初期化
-            const earnData = [[0,0,0,0,0,0], [0,0,0,0,0,0], [0,0,0,0,0,0]];
+            // 動的な人数に応じた収入データ配列の作成
+            const earnData = Array.from({length: state.children.length}, () => Array(6).fill(0));
             const spendData = [0,0,0,0,0,0];
 
             state.logs.forEach(log => {
                 const mIdx = months.indexOf(log.date.substring(0, 7));
                 if(mIdx !== -1) {
                     const cIdx = parseInt(log.childIdx);
-                    if(log.type === 'earn') {
-                        earnData[cIdx][mIdx] += log.amount;
-                    } else {
-                        spendData[mIdx] += log.amount;
+                    // 削除された子供のインデックス範囲外対策
+                    if (cIdx < state.children.length) {
+                        if(log.type === 'earn') {
+                            earnData[cIdx][mIdx] += log.amount;
+                        } else {
+                            spendData[mIdx] += log.amount;
+                        }
                     }
                 }
             });
@@ -526,21 +571,23 @@
                 myChart.destroy();
             }
 
-            const colors = ['#ffa07c', '#4ecdc4', '#ffda79'];
-
+            // 子供の人数が増えても対応できるように基本パレットを用意
+            const baseColors = ['#ffa07c', '#4ecdc4', '#ffda79', '#95a5a6', '#a55eea'];
             const datasets = [];
+            
             // 子どもの収入グラフ
-            for(let i=0; i<3; i++) {
+            state.children.forEach((name, i) => {
                 datasets.push({
-                    label: `${state.children[i]} (おてつだい)`,
+                    label: `${name} (おてつだい)`,
                     data: earnData[i],
-                    backgroundColor: colors[i],
+                    backgroundColor: baseColors[i % baseColors.length],
                     borderWidth: 2,
                     borderColor: '#4a4a4a',
                     type: 'bar',
                     stack: 'earn'
                 });
-            }
+            });
+
             // 支出グラフ
             datasets.push({
                 label: 'みんなのつかった分',
@@ -552,7 +599,6 @@
             });
 
             myChart = new Chart(ctx, {
-                type: 'bar',
                 data: {
                     labels: months.map(m => m.replace('-','年') + '月'),
                     datasets: datasets
@@ -588,6 +634,7 @@
                     ],
                     logs: []
                 };
+                initNameInputsUI();
                 initUI();
                 if(myChart) myChart.destroy();
                 alert('リセットしました！');
